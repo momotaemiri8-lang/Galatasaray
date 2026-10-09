@@ -179,8 +179,58 @@ async function startServer() {
 
   app.use(express.json({ limit: '5mb' }));
 
+  // ============================================================================
+  // CROSS-ORIGIN RESOURCE SHARING (CORS) FOR NETLIFY & EXTERNAL FRONTENDS
+  // ============================================================================
+  app.use('/api', (req, res, next) => {
+    const requestOrigin = req.headers.origin;
+    if (requestOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-CSRF-Token, Accept'
+    );
+    res.setHeader('Access-Control-Max-Age', '86400');
+
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+    next();
+  });
+
+  // 0. Public Telemetry & Backend Health Diagnostic Endpoint
+  app.get('/api/health', async (_req, res) => {
+    const startMs = Date.now();
+    try {
+      await db.select().from(siteConfigurations);
+      res.json({
+        status: 'operational',
+        databaseConnected: true,
+        latencyMs: Date.now() - startMs,
+        serverTimestamp: new Date().toISOString(),
+      });
+    } catch {
+      res.status(503).json({
+        status: 'degraded',
+        databaseConnected: false,
+        latencyMs: Date.now() - startMs,
+        serverTimestamp: new Date().toISOString(),
+      });
+    }
+  });
+
   // 1. Public Bootstrap Endpoint
   app.get('/api/bootstrap', async (_req, res) => {
+    const startMs = Date.now();
     try {
       const [data, integrations, matchCentre] = await Promise.all([
         getPublicBootstrapData(),
@@ -190,6 +240,11 @@ async function startServer() {
       res.json({
         ...data,
         matchCentre,
+        telemetryMeta: {
+          status: 'operational',
+          durationMs: Date.now() - startMs,
+          updatedAt: new Date().toISOString(),
+        },
         integrationSummary: integrations.map((i) => ({
           provider: i.provider,
           title: i.title,

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../lib/apiClient.ts';
 import {
   Shield,
   Users,
@@ -136,7 +137,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     if (!idToken) return;
     setAccessDeniedMessage(null);
     try {
-      const res = await fetch('/api/admin/overview', {
+      const res = await apiFetch('/api/admin/overview', {
         headers: { Authorization: `Bearer ${idToken}` },
       });
       if (res.status === 403) {
@@ -164,7 +165,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     updates: { role?: string; emailVerified?: boolean; accountDisabled?: boolean }
   ) => {
     if (!idToken) return;
-    const res = await fetch(`/api/admin/users/${userId}`, {
+    const res = await apiFetch(`/api/admin/users/${userId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -189,7 +190,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     if (!idToken) return;
     setTestingProvider(provider);
     try {
-      const res = await fetch(`/api/admin/integrations/test/${provider}`, {
+      const res = await apiFetch(`/api/admin/integrations/test/${provider}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -221,7 +222,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     if (!idToken) return;
     setSyncingFootballApi(true);
     try {
-      const res = await fetch('/api/admin/football-api/sync', {
+      const res = await apiFetch('/api/admin/football-api/sync', {
         method: 'POST',
         headers: { Authorization: `Bearer ${idToken}` },
       });
@@ -243,7 +244,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handleCreateMatch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken || !matchOpponent) return;
-    const res = await fetch('/api/admin/matches', {
+    const res = await apiFetch('/api/admin/matches', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -278,7 +279,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
     matchMinute: number
   ) => {
     if (!idToken) return;
-    const res = await fetch(`/api/admin/matches/${matchId}`, {
+    const res = await apiFetch(`/api/admin/matches/${matchId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -301,7 +302,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handleAddMatchEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken || !eventMatchId) return;
-    const res = await fetch(`/api/admin/matches/${eventMatchId}/events`, {
+    const res = await apiFetch(`/api/admin/matches/${eventMatchId}/events`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -326,7 +327,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handleAddPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken || !playerName) return;
-    const res = await fetch('/api/admin/players', {
+    const res = await apiFetch('/api/admin/players', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -354,7 +355,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken || !prodName) return;
-    const res = await fetch('/api/admin/products', {
+    const res = await apiFetch('/api/admin/products', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -382,7 +383,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handleCreateAuction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken || !aucTitle) return;
-    const res = await fetch('/api/admin/auctions', {
+    const res = await apiFetch('/api/admin/auctions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -410,7 +411,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handlePushTrackingEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken || !trackTarget) return;
-    const res = await fetch(`/api/admin/shipments/${encodeURIComponent(trackTarget)}/event`, {
+    const res = await apiFetch(`/api/admin/shipments/${encodeURIComponent(trackTarget)}/event`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -433,7 +434,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
   const handleEvaluateApplicant = async (id: number, status: string, score: number) => {
     if (!idToken) return;
-    const res = await fetch(`/api/admin/academy/${id}`, {
+    const res = await apiFetch(`/api/admin/academy/${id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -454,7 +455,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handlePublishArticle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken || !cmsTitle) return;
-    const res = await fetch('/api/admin/articles', {
+    const res = await apiFetch('/api/admin/articles', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -481,7 +482,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handleToggleArticleStatus = async (id: number, currentStatus: string) => {
     if (!idToken) return;
     const nextStatus = currentStatus === 'Published' ? 'Draft' : 'Published';
-    const res = await fetch(`/api/admin/articles/${id}`, {
+    const res = await apiFetch(`/api/admin/articles/${id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -499,7 +500,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!idToken) return;
-    const res = await fetch('/api/admin/config', {
+    const res = await apiFetch('/api/admin/config', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -520,7 +521,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
   const handleUpdateOrderStatus = async (orderId: number, status: string) => {
     if (!idToken) return;
-    const res = await fetch(`/api/admin/orders/${orderId}/status`, {
+    const res = await apiFetch(`/api/admin/orders/${orderId}/status`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -673,7 +674,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 message:
                   'This will permanently delete all initial sample records (is_dev_seed = true) across Players, Matches, Store, Auctions, and News while preserving your custom production records.',
                 onConfirm: async () => {
-                  const res = await fetch('/api/admin/dev-seed', {
+                  const res = await apiFetch('/api/admin/dev-seed', {
                     method: 'DELETE',
                     headers: { Authorization: `Bearer ${idToken}` },
                   });
@@ -1101,7 +1102,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                             message:
                               'Are you sure you want to permanently remove this match and its timeline events from the Match Centre?',
                             onConfirm: async () => {
-                              await fetch(`/api/admin/matches/${m.id}`, {
+                              await apiFetch(`/api/admin/matches/${m.id}`, {
                                 method: 'DELETE',
                                 headers: { Authorization: `Bearer ${idToken}` },
                               });
@@ -1466,7 +1467,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                         title: `Remove ${p.name}?`,
                         message: `Are you sure you want to permanently delete ${p.name} from the squad database?`,
                         onConfirm: async () => {
-                          await fetch(`/api/admin/players/${p.id}`, {
+                          await apiFetch(`/api/admin/players/${p.id}`, {
                             method: 'DELETE',
                             headers: { Authorization: `Bearer ${idToken}` },
                           });
@@ -1579,7 +1580,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                         message:
                           'Are you sure you want to permanently remove this product from GSStore?',
                         onConfirm: async () => {
-                          await fetch(`/api/admin/products/${prod.id}`, {
+                          await apiFetch(`/api/admin/products/${prod.id}`, {
                             method: 'DELETE',
                             headers: { Authorization: `Bearer ${idToken}` },
                           });
@@ -1680,7 +1681,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                           message:
                             'Are you sure you want to permanently remove this auction lot and its bid history?',
                           onConfirm: async () => {
-                            await fetch(`/api/admin/auctions/${a.id}`, {
+                            await apiFetch(`/api/admin/auctions/${a.id}`, {
                               method: 'DELETE',
                               headers: { Authorization: `Bearer ${idToken}` },
                             });
@@ -1937,7 +1938,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                           title: `Delete "${art.title}"?`,
                           message: 'This editorial story will be permanently removed from the CMS.',
                           onConfirm: async () => {
-                            await fetch(`/api/admin/articles/${art.id}`, {
+                            await apiFetch(`/api/admin/articles/${art.id}`, {
                               method: 'DELETE',
                               headers: { Authorization: `Bearer ${idToken}` },
                             });
@@ -1984,7 +1985,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                   <button
                     type="button"
                     onClick={async () => {
-                      await fetch(`/api/admin/support/${t.id}`, {
+                      await apiFetch(`/api/admin/support/${t.id}`, {
                         method: 'PATCH',
                         headers: {
                           'Content-Type': 'application/json',

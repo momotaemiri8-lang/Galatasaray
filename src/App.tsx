@@ -3,9 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { auth, googleAuthProvider } from './lib/firebase.ts';
+import {
+  apiFetch,
+  resolveApiConfig,
+  validateAndNormalizeBootstrapPayload,
+  TelemetryDiagnosticRecord,
+} from './lib/apiClient.ts';
 import { DigitalMembershipCard } from './components/DigitalMembershipCard.tsx';
 import { GlobalShippingMap } from './components/GlobalShippingMap.tsx';
 import { AdminControlCenter } from './components/AdminControlCenter.tsx';
@@ -106,8 +112,16 @@ export default function App() {
   });
   const [userBundle, setUserBundle] = useState<any>(null);
   const [loadingPublic, setLoadingPublic] = useState<boolean>(true);
+  const [retryingBootstrap, setRetryingBootstrap] = useState<boolean>(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [telemetryDiagnostic, setTelemetryDiagnostic] =
+    useState<TelemetryDiagnosticRecord | null>(null);
+  const [lastSuccessfulTelemetryAt, setLastSuccessfulTelemetryAt] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const bootstrapRequestSeqRef = useRef<number>(0);
+  const bootstrapAbortRef = useRef<AbortController | null>(null);
+  const consecutivePollFailuresRef = useRef<number>(0);
 
   // Match Centre & Fixtures Interactive States
   const [selectedMatchId, setSelectedMatchId] = useState<number | null>(null);
@@ -215,29 +229,182 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const loadBootstrapData = async () => {
+  const loadBootstrapData = async (isManualRetry = false) => {
+    const seq = ++bootstrapRequestSeqRef.current;
+
+    if (bootstrapAbortRef.current) {
+      bootstrapAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    bootstrapAbortRef.current = controller;
+
+    if (isManualRetry) {
+      setRetryingBootstrap(true);
+    }
     setBootstrapError(null);
+
+    const startMs = Date.now();
+    const apiCfg = resolveApiConfig();
+    const resolvedTargetOrigin = apiCfg.baseUrl || window.location.origin;
+
     try {
-      const res = await fetch('/api/bootstrap');
-      if (res.ok) {
-        const data = await res.json();
-        setPublicData(data);
-        if (data.meetSessions?.length && !selectedSessionId) {
-          setSelectedSessionId(data.meetSessions[0].id);
-        }
-        const matchesArr = data.matchCentre?.matches || data.matches || [];
-        if (matchesArr.length && selectedMatchId === null) {
-          const derbyOrFirst =
-            matchesArr.find((m: any) => m.opponent?.includes('Fenerbahçe')) || matchesArr[0];
-          setSelectedMatchId(derbyOrFirst.id);
-        }
-      } else {
+      const res = await apiFetch('/api/bootstrap', {
+        signal: controller.signal,
+        timeoutMs: 14000,
+      });
+
+      if (seq !== bootstrapRequestSeqRef.current) return;
+
+      const durationMs = Date.now() - startMs;
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+      if (contentType.includes('text/html')) {
+        const msg =
+          'Static host HTML fallback detected instead of JSON telemetry. Ensure the dist folder (with _redirects) is deployed or VITE_API_BASE_URL is configured.';
         setBootstrapError('Unable to load club platform telemetry.');
+        setTelemetryDiagnostic({
+          timestamp: new Date().toISOString(),
+          endpoint: '/api/bootstrap',
+          resolvedTargetOrigin,
+          success: false,
+          httpStatus: res.status,
+          durationMs,
+          errorCategory: 'STATIC_HOST_HTML_FALLBACK',
+          safeMessage: msg,
+          apiBaseUrlConfigured: apiCfg.explicitlyConfigured,
+          usedFallbackOrigin: apiCfg.isCrossOriginStaticHost,
+        });
+        return;
       }
-    } catch (err) {
-      setBootstrapError('Network error while connecting to Galatasaray SK backend.');
+
+      if (!res.ok) {
+        const category =
+          res.status === 401
+            ? 'UNAUTHORIZED_401'
+            : res.status === 403
+            ? 'FORBIDDEN_403'
+            : 'HTTP_ERROR';
+        let errDetail = `Backend responded with HTTP ${res.status}.`;
+        try {
+          const errJson = await res.json();
+          if (errJson?.error) errDetail = String(errJson.error);
+        } catch {
+          // Ignore non-JSON error body
+        }
+        setBootstrapError('Unable to load club platform telemetry.');
+        setTelemetryDiagnostic({
+          timestamp: new Date().toISOString(),
+          endpoint: '/api/bootstrap',
+          resolvedTargetOrigin,
+          success: false,
+          httpStatus: res.status,
+          durationMs,
+          errorCategory: category,
+          safeMessage: errDetail,
+          apiBaseUrlConfigured: apiCfg.explicitlyConfigured,
+          usedFallbackOrigin: apiCfg.isCrossOriginStaticHost,
+        });
+        return;
+      }
+
+      let rawData: any = null;
+      try {
+        rawData = await res.json();
+      } catch {
+        setBootstrapError('Unable to load club platform telemetry.');
+        setTelemetryDiagnostic({
+          timestamp: new Date().toISOString(),
+          endpoint: '/api/bootstrap',
+          resolvedTargetOrigin,
+          success: false,
+          httpStatus: res.status,
+          durationMs,
+          errorCategory: 'INVALID_JSON_STRUCTURE',
+          safeMessage: 'Response body could not be parsed as valid JSON.',
+          apiBaseUrlConfigured: apiCfg.explicitlyConfigured,
+          usedFallbackOrigin: apiCfg.isCrossOriginStaticHost,
+        });
+        return;
+      }
+
+      const validated = validateAndNormalizeBootstrapPayload(rawData);
+      if (!validated.valid || !validated.normalized) {
+        setBootstrapError('Unable to load club platform telemetry.');
+        setTelemetryDiagnostic({
+          timestamp: new Date().toISOString(),
+          endpoint: '/api/bootstrap',
+          resolvedTargetOrigin,
+          success: false,
+          httpStatus: res.status,
+          durationMs,
+          errorCategory: 'INVALID_JSON_STRUCTURE',
+          safeMessage: validated.reason || 'Unexpected telemetry payload structure.',
+          apiBaseUrlConfigured: apiCfg.explicitlyConfigured,
+          usedFallbackOrigin: apiCfg.isCrossOriginStaticHost,
+        });
+        return;
+      }
+
+      const data = validated.normalized;
+      setPublicData(data);
+      setBootstrapError(null);
+      consecutivePollFailuresRef.current = 0;
+
+      const nowIso = new Date().toISOString();
+      setLastSuccessfulTelemetryAt(nowIso);
+      setTelemetryDiagnostic({
+        timestamp: nowIso,
+        endpoint: '/api/bootstrap',
+        resolvedTargetOrigin,
+        success: true,
+        httpStatus: res.status,
+        durationMs,
+        errorCategory: 'NONE',
+        safeMessage: `Verified ${data.players.length} squad profiles, ${data.matches.length} fixtures, and ${data.products.length} GSStore items (${durationMs}ms).`,
+        apiBaseUrlConfigured: apiCfg.explicitlyConfigured,
+        usedFallbackOrigin: apiCfg.isCrossOriginStaticHost,
+      });
+
+      if (data.meetSessions?.length && !selectedSessionId) {
+        setSelectedSessionId(data.meetSessions[0].id);
+      }
+      const matchesArr = data.matchCentre?.matches || data.matches || [];
+      if (matchesArr.length && selectedMatchId === null) {
+        const derbyOrFirst =
+          matchesArr.find((m: any) => m.opponent?.includes('Fenerbahçe')) || matchesArr[0];
+        setSelectedMatchId(derbyOrFirst.id);
+      }
+      if (isManualRetry) {
+        showToast('Platform telemetry connection restored.');
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError' && seq !== bootstrapRequestSeqRef.current) {
+        return;
+      }
+      if (seq !== bootstrapRequestSeqRef.current) return;
+
+      const durationMs = Date.now() - startMs;
+      const isTimeout = err?.name === 'AbortError';
+      setBootstrapError('Unable to load club platform telemetry.');
+      setTelemetryDiagnostic({
+        timestamp: new Date().toISOString(),
+        endpoint: '/api/bootstrap',
+        resolvedTargetOrigin,
+        success: false,
+        httpStatus: null,
+        durationMs,
+        errorCategory: isTimeout ? 'TIMEOUT' : 'NETWORK_OR_CORS',
+        safeMessage: isTimeout
+          ? `Request timed out after ${durationMs}ms while contacting backend.`
+          : 'Network or cross-origin connection error while reaching Galatasaray SK backend.',
+        apiBaseUrlConfigured: apiCfg.explicitlyConfigured,
+        usedFallbackOrigin: apiCfg.isCrossOriginStaticHost,
+      });
     } finally {
-      setLoadingPublic(false);
+      if (seq === bootstrapRequestSeqRef.current) {
+        setLoadingPublic(false);
+        setRetryingBootstrap(false);
+      }
     }
   };
 
@@ -245,7 +412,7 @@ export default function App() {
     setTrackingError(null);
     try {
       const querySuffix = useLiveDhl ? '?mode=dhl_live' : '';
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/shipments/track/${encodeURIComponent(num.trim())}${querySuffix}`
       );
       const data = await res.json();
@@ -262,7 +429,7 @@ export default function App() {
 
   const loadUserDashboard = async (token: string) => {
     try {
-      const res = await fetch('/api/me', {
+      const res = await apiFetch('/api/me', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -278,8 +445,14 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadBootstrapData();
+    loadBootstrapData(false);
     loadTrackedShipment('GS-INTL-19058824TR');
+
+    // Automatically recover when browser network connectivity returns
+    const handleOnline = () => {
+      loadBootstrapData(false);
+    };
+    window.addEventListener('online', handleOnline);
 
     // Inspect URL query parameters for ?authAction=verify-email&token=... or ?authAction=reset-password&token=...
     try {
@@ -294,24 +467,37 @@ export default function App() {
     } catch {
       // Ignore URL parse errors
     }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      if (bootstrapAbortRef.current) {
+        bootstrapAbortRef.current.abort();
+      }
+    };
   }, []);
 
-  // Live Match Centre automatic polling when viewing Match Centre
+  // Live Match Centre automatic polling when viewing Match Centre (paused on backend errors)
   useEffect(() => {
-    if (activeModule !== 'match-centre' || !autoPollEnabled) return;
+    if (activeModule !== 'match-centre' || !autoPollEnabled || bootstrapError) return;
     const interval = setInterval(async () => {
+      if (consecutivePollFailuresRef.current >= 3) return;
       try {
-        const res = await fetch('/api/match-centre');
+        const res = await apiFetch('/api/match-centre', { timeoutMs: 10000 });
         if (res.ok) {
           const mc = await res.json();
-          setPublicData((prev: any) => ({ ...prev, matchCentre: mc, matches: mc.matches }));
+          if (mc && Array.isArray(mc.matches)) {
+            consecutivePollFailuresRef.current = 0;
+            setPublicData((prev: any) => ({ ...prev, matchCentre: mc, matches: mc.matches }));
+          }
+        } else {
+          consecutivePollFailuresRef.current += 1;
         }
       } catch {
-        // Silent background refresh
+        consecutivePollFailuresRef.current += 1;
       }
     }, 30000);
     return () => clearInterval(interval);
-  }, [activeModule, autoPollEnabled]);
+  }, [activeModule, autoPollEnabled, bootstrapError]);
 
   useEffect(() => {
     // Load existing session token if present in localStorage
@@ -367,7 +553,7 @@ export default function App() {
   const handleSignOut = async () => {
     try {
       if (idToken) {
-        await fetch('/api/auth/logout', {
+        await apiFetch('/api/auth/logout', {
           method: 'POST',
           headers: { Authorization: `Bearer ${idToken}` },
         });
@@ -442,7 +628,7 @@ export default function App() {
   const handleInitializeStripeIntent = async () => {
     const token = await requireAuthentication();
     if (!token) return;
-    const res = await fetch('/api/payments/stripe/create-intent', {
+    const res = await apiFetch('/api/payments/stripe/create-intent', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -465,7 +651,7 @@ export default function App() {
   const handleInitializePayPalOrder = async () => {
     const token = await requireAuthentication();
     if (!token) return;
-    const res = await fetch('/api/payments/paypal/create-order', {
+    const res = await apiFetch('/api/payments/paypal/create-order', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -490,7 +676,7 @@ export default function App() {
     const token = await requireAuthentication();
     if (!token) return;
 
-    const res = await fetch('/api/orders/checkout', {
+    const res = await apiFetch('/api/orders/checkout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -529,7 +715,7 @@ export default function App() {
     const token = await requireAuthentication();
     if (!token) return;
 
-    const res = await fetch('/api/memberships/purchase', {
+    const res = await apiFetch('/api/memberships/purchase', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -556,7 +742,7 @@ export default function App() {
   };
 
   const handleVerifyQr = async (memberNumber: string) => {
-    const res = await fetch(`/api/memberships/verify/${encodeURIComponent(memberNumber)}`);
+    const res = await apiFetch(`/api/memberships/verify/${encodeURIComponent(memberNumber)}`);
     const data = await res.json();
     setQrVerificationResult(data);
   };
@@ -571,7 +757,7 @@ export default function App() {
       return;
     }
 
-    const res = await fetch(`/api/auctions/${auctionId}/bid`, {
+    const res = await apiFetch(`/api/auctions/${auctionId}/bid`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -598,7 +784,7 @@ export default function App() {
     const token = await requireAuthentication();
     if (!token) return;
 
-    const res = await fetch('/api/meet-bookings', {
+    const res = await apiFetch('/api/meet-bookings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -627,7 +813,7 @@ export default function App() {
     const token = await requireAuthentication();
     if (!token) return;
 
-    const res = await fetch('/api/academy/apply', {
+    const res = await apiFetch('/api/academy/apply', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -666,7 +852,7 @@ export default function App() {
     const token = await requireAuthentication();
     if (!token) return;
 
-    const res = await fetch('/api/support/tickets', {
+    const res = await apiFetch('/api/support/tickets', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -692,7 +878,7 @@ export default function App() {
   const handleSubscribeNewsletter = async (e: React.FormEvent) => {
     e.preventDefault();
     setNewsletterStatus(null);
-    const res = await fetch('/api/newsletter/subscribe', {
+    const res = await apiFetch('/api/newsletter/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1192,16 +1378,57 @@ export default function App() {
             </div>
           </div>
         ) : bootstrapError ? (
-          <div className="rounded-3xl border border-[#EF4444]/40 bg-[#11131B] p-12 text-center space-y-4">
+          <div className="rounded-3xl border border-[#EF4444]/40 bg-[#11131B] p-10 sm:p-12 text-center space-y-6 max-w-2xl mx-auto">
             <AlertCircle className="w-12 h-12 text-[#EF4444] mx-auto" />
-            <h2 className="text-2xl font-bold text-white">{bootstrapError}</h2>
-            <button
-              type="button"
-              onClick={loadBootstrapData}
-              className="px-6 py-3 rounded-xl bg-[#A90432] text-sm font-semibold text-white"
-            >
-              Retry Connection
-            </button>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-white">{bootstrapError}</h2>
+              {telemetryDiagnostic && (
+                <p className="text-xs text-[#94A3B8] max-w-lg mx-auto leading-relaxed">
+                  {telemetryDiagnostic.safeMessage}
+                </p>
+              )}
+            </div>
+
+            {telemetryDiagnostic && (
+              <div className="rounded-2xl border border-[#232736] bg-[#07080C] p-4 text-left grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+                <div>
+                  <span className="text-[#94A3B8]">Diagnostic Code: </span>
+                  <span className="text-[#FDB912]">{telemetryDiagnostic.errorCategory}</span>
+                </div>
+                <div>
+                  <span className="text-[#94A3B8]">HTTP Status: </span>
+                  <span className="text-white">
+                    {telemetryDiagnostic.httpStatus !== null
+                      ? telemetryDiagnostic.httpStatus
+                      : 'N/A'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[#94A3B8]">Latency: </span>
+                  <span className="text-white">{telemetryDiagnostic.durationMs}ms</span>
+                </div>
+                <div>
+                  <span className="text-[#94A3B8]">Last Verified Sync: </span>
+                  <span className="text-white">
+                    {lastSuccessfulTelemetryAt
+                      ? lastSuccessfulTelemetryAt.replace('T', ' ').slice(0, 19) + ' UTC'
+                      : 'None in current session'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={retryingBootstrap}
+                onClick={() => loadBootstrapData(true)}
+                className="px-6 py-3 rounded-xl bg-[#A90432] hover:bg-[#8B0329] disabled:opacity-50 text-sm font-semibold text-white inline-flex items-center gap-2 transition-colors"
+              >
+                <RefreshCw className={`w-4 h-4 ${retryingBootstrap ? 'animate-spin' : ''}`} />
+                {retryingBootstrap ? 'Retrying Telemetry...' : 'Retry Connection'}
+              </button>
+            </div>
           </div>
         ) : (
           <AnimatePresence mode="wait">
@@ -1727,7 +1954,7 @@ export default function App() {
                       </button>
                       <button
                         type="button"
-                        onClick={loadBootstrapData}
+                        onClick={() => loadBootstrapData(true)}
                         className="px-4 py-2.5 rounded-xl bg-[#A90432] text-xs font-semibold text-white flex items-center gap-2"
                       >
                         <RefreshCw className="w-3.5 h-3.5" /> Refresh Now

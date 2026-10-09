@@ -1,0 +1,5 @@
+# Proxy all /api/* requests on Netlify to the live Cloud Run Express + PostgreSQL backend
+/api/*  https://ais-pre-2ogzxwcpbrpxkhvs5esgzn-97089877236.europe-west2.run.app/api/:splat  200!
+
+# Single-Page Application fallback for client-side routes
+/*      /index.html   200
