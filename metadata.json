@@ -1,0 +1,8 @@
+{
+  "name": "Galatasaray SK Official Global Digital Platform",
+  "description": "Enterprise football club platform featuring First Team directory, Meet the Stars booking, Florya Academy recruitment, Global Membership with QR cards, Official Store, Match-Worn Auctions, International Shipping Tracker, and Granular Admin Control Centre.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
