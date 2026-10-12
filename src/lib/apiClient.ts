@@ -4,14 +4,10 @@
  *
  * Galatasaray SK Platform API & Telemetry Client
  *
- * Resolves the production API base URL for both same-origin Cloud Run deployments
- * and cross-origin static Netlify manual folder deployments, adds CORS-compatible
- * request handling, request timeouts, AbortController support, response content-type
- * validation, and safe telemetry diagnostics.
+ * Resolves the production API base URL for both same-origin server deployments
+ * and static Netlify manual folder deployments, adds automatic static .json
+ * fallback, CORS-compatible headers, request timeouts, and diagnostic records.
  */
-
-const DEFAULT_PRODUCTION_BACKEND_URL =
-  'https://ais-pre-2ogzxwcpbrpxkhvs5esgzn-97089877236.europe-west2.run.app';
 
 export interface TelemetryDiagnosticRecord {
   timestamp: string;
@@ -22,6 +18,7 @@ export interface TelemetryDiagnosticRecord {
   durationMs: number;
   errorCategory:
     | 'NONE'
+    | 'STATIC_CDN_FALLBACK'
     | 'STATIC_HOST_HTML_FALLBACK'
     | 'NETWORK_OR_CORS'
     | 'TIMEOUT'
@@ -36,8 +33,8 @@ export interface TelemetryDiagnosticRecord {
 }
 
 /**
- * Determines whether the current browser origin is a static hosting domain
- * (such as *.netlify.app) or whether an explicit VITE_API_BASE_URL is configured.
+ * Determines whether an explicit VITE_API_BASE_URL is configured
+ * or whether the app is running in same-origin mode.
  */
 export function resolveApiConfig(): {
   baseUrl: string;
@@ -56,29 +53,8 @@ export function resolveApiConfig(): {
     };
   }
 
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname.toLowerCase();
-    // Same-origin when running on AI Studio Cloud Run (*.run.app) or local Express dev server
-    const isSameOriginFullStack =
-      host.endsWith('.run.app') || host === 'localhost' || host === '127.0.0.1';
-
-    if (isSameOriginFullStack) {
-      return {
-        baseUrl: '',
-        explicitlyConfigured: false,
-        isCrossOriginStaticHost: false,
-      };
-    }
-
-    // Running on Netlify (*.netlify.app) or custom domain uploaded manually:
-    // Route API requests to the provisioned Cloud Run backend service URL
-    return {
-      baseUrl: DEFAULT_PRODUCTION_BACKEND_URL,
-      explicitlyConfigured: false,
-      isCrossOriginStaticHost: true,
-    };
-  }
-
+  // When no remote API URL is explicitly configured, use relative same-origin paths.
+  // Netlify routes /api/* to the static json files or local endpoints.
   return {
     baseUrl: '',
     explicitlyConfigured: false,
@@ -94,8 +70,9 @@ export function buildApiUrl(path: string): string {
 }
 
 /**
- * Drop-in replacement for window.fetch that automatically routes `/api/*` requests
- * to the configured backend server when hosted on Netlify or another static host.
+ * Drop-in replacement for window.fetch that automatically routes `/api/*` requests,
+ * applies timeouts, and on static hosts (like Netlify) falls back to static `.json` files
+ * if the naked endpoint returns 404 or an HTML SPA fallback.
  */
 export async function apiFetch(
   input: string,
@@ -124,29 +101,62 @@ export async function apiFetch(
   try {
     const headers = new Headers(init?.headers || {});
     if (!headers.has('Accept')) {
-      headers.set('Accept', 'application/json');
+      headers.set('Accept', 'application/json, text/plain, */*');
     }
 
-    const response = await window.fetch(url, {
-      ...init,
-      headers,
-      signal: controller.signal,
-    });
-
-    // If a relative request on a static host accidentally returned HTML (e.g. index.html fallback),
-    // automatically retry once against the production Cloud Run backend URL.
-    const contentType = (response.headers.get('content-type') || '').toLowerCase();
-    if (
-      input.startsWith('/api/') &&
-      !url.startsWith('http') &&
-      contentType.includes('text/html')
-    ) {
-      const fallbackUrl = `${DEFAULT_PRODUCTION_BACKEND_URL}${input}`;
-      return await window.fetch(fallbackUrl, {
+    let response: Response;
+    try {
+      response = await window.fetch(url, {
         ...init,
         headers,
         signal: controller.signal,
       });
+    } catch (networkErr: any) {
+      // If relative API call failed on static host, try .json static payload fallback
+      if (
+        input.startsWith('/api/') &&
+        !input.endsWith('.json') &&
+        (!init?.method || init.method.toUpperCase() === 'GET')
+      ) {
+        try {
+          const jsonFallbackUrl = `${input}.json`;
+          const fallbackRes = await window.fetch(jsonFallbackUrl, {
+            ...init,
+            headers,
+            signal: controller.signal,
+          });
+          if (fallbackRes.ok) return fallbackRes;
+        } catch {
+          // Rethrow original error if fallback also fails
+        }
+      }
+      throw networkErr;
+    }
+
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+    // If a GET /api/* request returned HTML (Netlify SPA index.html fallback) or 404:
+    // try the corresponding static .json asset
+    if (
+      input.startsWith('/api/') &&
+      !input.endsWith('.json') &&
+      (!init?.method || init.method.toUpperCase() === 'GET') &&
+      (contentType.includes('text/html') || response.status === 404)
+    ) {
+      try {
+        const jsonFallbackUrl = `${input}.json`;
+        const fallbackRes = await window.fetch(jsonFallbackUrl, {
+          ...init,
+          headers,
+          signal: controller.signal,
+        });
+        const fallbackContentType = (fallbackRes.headers.get('content-type') || '').toLowerCase();
+        if (fallbackRes.ok && !fallbackContentType.includes('text/html')) {
+          return fallbackRes;
+        }
+      } catch {
+        // Fall back to returning original response
+      }
     }
 
     return response;

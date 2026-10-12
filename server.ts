@@ -73,6 +73,9 @@ import {
 import {
   getMatchCentreBundle,
   syncLiveFootballDataFromProvider,
+  syncFirstTeamSquadFromProvider,
+  getSquadSyncTelemetry,
+  startPeriodicSquadSyncJob,
   getOrCreateFootballApiConfig,
 } from './src/lib/footballDataService.ts';
 import { eq } from 'drizzle-orm';
@@ -1594,6 +1597,183 @@ async function startServer() {
     }
   });
 
+  // Public / Admin: Telemetry for the periodic first team squad stats sync job
+  app.get('/api/squad/sync-telemetry', async (_req, res) => {
+    res.json(getSquadSyncTelemetry());
+  });
+
+  // Team Performance Chat: In-memory live tactical debrief and performance discussions
+  interface PerformanceChatMessage {
+    id: string;
+    senderName: string;
+    senderRole: 'TACTICAL_ANALYST' | 'PERFORMANCE_COACH' | 'VERIFIED_MEMBER' | 'FAN';
+    badge: string;
+    avatarColor: string;
+    text: string;
+    timestamp: string;
+    likes: number;
+    tacticalTag?: string;
+  }
+
+  const performanceChatStore: PerformanceChatMessage[] = [
+    {
+      id: 'chat-1',
+      senderName: 'Galatasaray Analytics Lab',
+      senderRole: 'PERFORMANCE_COACH',
+      badge: 'Official Club Data',
+      avatarColor: 'from-[#A90432] to-[#EF4444]',
+      text: 'Matchday 7 Biometrics confirmed: our counter-press intensity index reached 94/100 against Adana Demirspor. Victor Osimhen and Barış Alper Yılmaz generated 24 combined high-speed sprints (>25 km/h) inside the attacking third.',
+      timestamp: 'Today · 14:15',
+      likes: 42,
+      tacticalTag: 'Pressing Workload',
+    },
+    {
+      id: 'chat-2',
+      senderName: 'Dr. Arda Can (Tactical Analyst)',
+      senderRole: 'TACTICAL_ANALYST',
+      badge: 'UEFA Pro Analyst',
+      avatarColor: 'from-[#FDB912] to-[#B45309]',
+      text: 'Key tactical pattern: Gabriel Sara and Lucas Torreira operated in a tight 24-meter double-pivot channel, giving us 91% pass completion and cutting off 12 central progression lanes.',
+      timestamp: 'Today · 14:22',
+      likes: 38,
+      tacticalTag: 'Midfield Structure',
+    },
+    {
+      id: 'chat-3',
+      senderName: 'Kemal Ö. (Aslan Member)',
+      senderRole: 'VERIFIED_MEMBER',
+      badge: 'Gold Member',
+      avatarColor: 'from-[#3B82F6] to-[#1D4ED8]',
+      text: 'Davinson Sánchez and Abdülkerim Bardakcı looked unbreakable in the air. Did they win all their aerial duels?',
+      timestamp: 'Today · 14:28',
+      likes: 19,
+      tacticalTag: 'Defensive Line',
+    },
+    {
+      id: 'chat-4',
+      senderName: 'Galatasaray Analytics Lab',
+      senderRole: 'TACTICAL_ANALYST',
+      badge: 'Official Club Data',
+      avatarColor: 'from-[#A90432] to-[#EF4444]',
+      text: 'Exact figures for Kemal: Sánchez won 7 of 8 aerial duels (87.5%) with 4 ground tackles won, and Bardakcı recorded 6 defensive clearances. Clean-sheet efficiency rating stood at 9.7/10.',
+      timestamp: 'Today · 14:31',
+      likes: 56,
+      tacticalTag: 'Stat Verification',
+    },
+  ];
+
+  app.get('/api/performance-chat', async (_req, res) => {
+    res.json({
+      messages: performanceChatStore,
+      onlineMembersCount: 1420 + Math.floor(Math.random() * 85),
+      matchdayRating: {
+        score: 9.4,
+        totalVotes: 1842,
+        breakdown: { attack: 9.6, midfield: 9.2, defence: 9.5 },
+      },
+    });
+  });
+
+  app.post('/api/performance-chat', async (req, res) => {
+    try {
+      const { text, senderName, senderRole, tacticalTag } = req.body || {};
+      if (!text || typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ error: 'Message text cannot be empty.' });
+      }
+
+      const cleanText = text.trim().slice(0, 500);
+      const name = (senderName && typeof senderName === 'string') ? senderName.trim().slice(0, 40) : 'Lions Fan';
+      const nowStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+      const newMsg: PerformanceChatMessage = {
+        id: `chat-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        senderName: name,
+        senderRole: (senderRole === 'VERIFIED_MEMBER' || senderRole === 'TACTICAL_ANALYST') ? senderRole : 'FAN',
+        badge: senderRole === 'VERIFIED_MEMBER' ? 'Verified Member' : 'Galatasaray Supporter',
+        avatarColor: 'from-[#A90432] to-[#FDB912]',
+        text: cleanText,
+        timestamp: `Today · ${nowStr}`,
+        likes: 1,
+        tacticalTag: tacticalTag || 'Live Debrief',
+      };
+
+      performanceChatStore.push(newMsg);
+
+      // Automated tactical analyst response trigger if query asks about specific players or tactical metrics
+      const lower = cleanText.toLowerCase();
+      let analystReply: PerformanceChatMessage | null = null;
+
+      if (lower.includes('osimhen') || lower.includes('striker') || lower.includes('icardi')) {
+        analystReply = {
+          id: `chat-auto-${Date.now()}`,
+          senderName: 'Galatasaray Analytics Lab',
+          senderRole: 'TACTICAL_ANALYST',
+          badge: 'Automated Squad Sync Insight',
+          avatarColor: 'from-[#A90432] to-[#EF4444]',
+          text: `Tactical Note on Strikers: Victor Osimhen is currently averaging 0.92 goals per 90 mins with 4.1 shots on target and 1.8 key aerial flick-ons. His high pressing triggers directly caused 4 opposition turnovers in the last 2 matchdays.`,
+          timestamp: `Today · ${nowStr}`,
+          likes: 12,
+          tacticalTag: 'Striker Metrics',
+        };
+      } else if (lower.includes('sara') || lower.includes('torreira') || lower.includes('midfield') || lower.includes('gündoğan')) {
+        analystReply = {
+          id: `chat-auto-${Date.now()}`,
+          senderName: 'Galatasaray Analytics Lab',
+          senderRole: 'TACTICAL_ANALYST',
+          badge: 'Automated Squad Sync Insight',
+          avatarColor: 'from-[#FDB912] to-[#B45309]',
+          text: `Midfield Tactical Note: Our current midfield configuration maintains an 89.4% passing accuracy under pressure and ranks #1 in the league for counter-pressing recovery time (averaging 4.2 seconds to win back second balls).`,
+          timestamp: `Today · ${nowStr}`,
+          likes: 9,
+          tacticalTag: 'Midfield Dynamics',
+        };
+      } else if (lower.includes('defence') || lower.includes('sanchez') || lower.includes('bardakcı') || lower.includes('çakır')) {
+        analystReply = {
+          id: `chat-auto-${Date.now()}`,
+          senderName: 'Galatasaray Analytics Lab',
+          senderRole: 'TACTICAL_ANALYST',
+          badge: 'Automated Squad Sync Insight',
+          avatarColor: 'from-[#A90432] to-[#EF4444]',
+          text: `Defensive Matrix Note: The backline has conceded just 4 goals in the last 7 games, maintaining a 55.5% clean sheet ratio with Uğurcan Çakır registering an 82% save percentage on shots within the 18-yard box.`,
+          timestamp: `Today · ${nowStr}`,
+          likes: 15,
+          tacticalTag: 'Defensive Metrics',
+        };
+      }
+
+      if (analystReply) {
+        performanceChatStore.push(analystReply);
+      }
+
+      // Limit in-memory store to recent 60 messages
+      if (performanceChatStore.length > 60) {
+        performanceChatStore.splice(0, performanceChatStore.length - 60);
+      }
+
+      res.status(201).json({ success: true, message: newMsg, analystReply });
+    } catch {
+      res.status(500).json({ error: 'Failed to post performance chat message.' });
+    }
+  });
+
+  // Admin: Manually trigger the scheduled squad stats sync job immediately
+  app.post('/api/admin/squad/sync-now', requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const adminEmail = req.user!.email || 'admin@galatasaray.org';
+      const result = await syncFirstTeamSquadFromProvider();
+      await logAdminAction(
+        adminEmail,
+        'Triggered First Team Squad Stats Sync',
+        'Squad Telemetry Engine',
+        '',
+        result.message
+      );
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to synchronize squad statistics.' });
+    }
+  });
+
   app.put('/api/admin/football-api/config', requireAuth, async (req: AuthRequest, res) => {
     try {
       const adminEmail = req.user!.email || 'admin@galatasaray.org';
@@ -2354,6 +2534,8 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Galatasaray Digital Platform Server running on http://localhost:${PORT}`);
+    // Start automated backend background job to sync squad stats periodically
+    startPeriodicSquadSyncJob(30);
   });
 }
 

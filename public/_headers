@@ -1,0 +1,11 @@
+# Netlify HTTP Response Headers for Galatasaray SK Platform
+
+/api/*
+  Content-Type: application/json; charset=utf-8
+  Access-Control-Allow-Origin: *
+  Access-Control-Allow-Methods: GET, POST, OPTIONS
+  Access-Control-Allow-Headers: Content-Type, Authorization, Accept
+  Cache-Control: public, max-age=0, must-revalidate
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -1,0 +1,58 @@
+{
+  "messages": [
+    {
+      "id": "chat-1",
+      "senderName": "Galatasaray Analytics Lab",
+      "senderRole": "PERFORMANCE_COACH",
+      "badge": "Official Club Data",
+      "avatarColor": "from-[#A90432] to-[#EF4444]",
+      "text": "Matchday 7 Biometrics confirmed: our counter-press intensity index reached 94/100 against Adana Demirspor. Victor Osimhen and Barış Alper Yılmaz generated 24 combined high-speed sprints (>25 km/h) inside the attacking third.",
+      "timestamp": "Today · 14:15",
+      "likes": 42,
+      "tacticalTag": "Pressing Workload"
+    },
+    {
+      "id": "chat-2",
+      "senderName": "Dr. Arda Can (Tactical Analyst)",
+      "senderRole": "TACTICAL_ANALYST",
+      "badge": "UEFA Pro Analyst",
+      "avatarColor": "from-[#FDB912] to-[#B45309]",
+      "text": "Key tactical pattern: Gabriel Sara and Lucas Torreira operated in a tight 24-meter double-pivot channel, giving us 91% pass completion and cutting off 12 central progression lanes.",
+      "timestamp": "Today · 14:22",
+      "likes": 38,
+      "tacticalTag": "Midfield Structure"
+    },
+    {
+      "id": "chat-3",
+      "senderName": "Kemal Ö. (Aslan Member)",
+      "senderRole": "VERIFIED_MEMBER",
+      "badge": "Gold Member",
+      "avatarColor": "from-[#3B82F6] to-[#1D4ED8]",
+      "text": "Davinson Sánchez and Abdülkerim Bardakcı looked unbreakable in the air. Did they win all their aerial duels?",
+      "timestamp": "Today · 14:28",
+      "likes": 19,
+      "tacticalTag": "Defensive Line"
+    },
+    {
+      "id": "chat-4",
+      "senderName": "Galatasaray Analytics Lab",
+      "senderRole": "TACTICAL_ANALYST",
+      "badge": "Official Club Data",
+      "avatarColor": "from-[#A90432] to-[#EF4444]",
+      "text": "Exact figures for Kemal: Sánchez won 7 of 8 aerial duels (87.5%) with 4 ground tackles won, and Bardakcı recorded 6 defensive clearances. Clean-sheet efficiency rating stood at 9.7/10.",
+      "timestamp": "Today · 14:31",
+      "likes": 56,
+      "tacticalTag": "Stat Verification"
+    }
+  ],
+  "onlineMembersCount": 1421,
+  "matchdayRating": {
+    "score": 9.4,
+    "totalVotes": 1842,
+    "breakdown": {
+      "attack": 9.6,
+      "midfield": 9.2,
+      "defence": 9.5
+    }
+  }
+}

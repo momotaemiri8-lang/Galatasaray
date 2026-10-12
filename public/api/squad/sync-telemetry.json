@@ -1,0 +1,12 @@
+{
+  "lastSyncAttemptAt": "2026-10-12 13:25:17 UTC",
+  "lastSuccessfulSyncAt": null,
+  "lastSyncStatus": "FAILED",
+  "updatedPlayerCount": 0,
+  "totalSquadCount": 30,
+  "syncIntervalMinutes": 30,
+  "syncSource": "Official Sports Data API (API-Football / Football-Data)",
+  "nextScheduledSyncAt": "2026-10-12 13:55:17 UTC",
+  "lastMessage": "Sports data sync warning: Sports API HTTP 403: {\"get\": \"\",\"parameters\": [],\"errors\": {\"token\": \"Invalid API key, please check your request and cred",
+  "autoSyncActive": true
+}

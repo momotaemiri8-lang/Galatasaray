@@ -5,16 +5,40 @@
   command = "npm run build"
   publish = "dist"
 
-# 2. Proxy all /api/* requests to the live Cloud Run Express + PostgreSQL backend
-#    so relative /api/* calls never hit Netlify's static 404 or SPA HTML fallback.
+# 2. Map API telemetry endpoints to static JSON payloads
 [[redirects]]
-  from = "/api/*"
-  to = "https://ais-pre-2ogzxwcpbrpxkhvs5esgzn-97089877236.europe-west2.run.app/api/:splat"
+  from = "/api/bootstrap"
+  to = "/api/bootstrap.json"
   status = 200
-  force = true
+
+[[redirects]]
+  from = "/api/squad/sync-telemetry"
+  to = "/api/squad/sync-telemetry.json"
+  status = 200
+
+[[redirects]]
+  from = "/api/performance-chat"
+  to = "/api/performance-chat.json"
+  status = 200
+
+[[redirects]]
+  from = "/api/health"
+  to = "/api/health.json"
+  status = 200
 
 # 3. Single-Page Application (SPA) routing fallback for non-API routes
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# 4. HTTP Headers for API responses and static assets
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Content-Type = "application/json; charset=utf-8"
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization, Accept"
+    Cache-Control = "public, max-age=0, must-revalidate"
+

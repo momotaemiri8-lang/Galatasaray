@@ -1,5 +1,10 @@
-# Proxy all /api/* requests on Netlify to the live Cloud Run Express + PostgreSQL backend
-/api/*  https://ais-pre-2ogzxwcpbrpxkhvs5esgzn-97089877236.europe-west2.run.app/api/:splat  200!
+# Galatasaray SK Platform - Netlify Redirect Rules
+# Map API requests to static JSON payloads when hosted statically on Netlify
+/api/bootstrap              /api/bootstrap.json            200
+/api/squad/sync-telemetry   /api/squad/sync-telemetry.json 200
+/api/performance-chat       /api/performance-chat.json     200
+/api/health                 /api/health.json               200
 
-# Single-Page Application fallback for client-side routes
-/*      /index.html   200
+# Single-Page Application (SPA) client-side routing fallback for web pages
+/*                          /index.html                    200
+

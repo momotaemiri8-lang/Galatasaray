@@ -1,12 +1,13 @@
 import { db } from '../db/index.ts';
 import {
+  players,
   matches,
   matchEvents,
   matchLineups,
   competitionStandings,
   footballApiConfigs,
 } from '../db/schema.ts';
-import { eq, asc } from 'drizzle-orm';
+import { eq, asc, sql } from 'drizzle-orm';
 import { sanitizeProviderError } from './integrations.ts';
 
 function isFootballApiKeyPresent(): boolean {
@@ -528,3 +529,188 @@ export async function syncLiveFootballDataFromProvider() {
     };
   }
 }
+
+// In-memory telemetry cache for the automated periodic squad sync engine
+interface SquadSyncTelemetry {
+  lastSyncAttemptAt: string | null;
+  lastSuccessfulSyncAt: string | null;
+  lastSyncStatus: 'IDLE' | 'SYNCED_LIVE' | 'RETAINED_FALLBACK' | 'FAILED';
+  updatedPlayerCount: number;
+  totalSquadCount: number;
+  syncIntervalMinutes: number;
+  syncSource: string;
+  nextScheduledSyncAt: string | null;
+  lastMessage: string;
+  autoSyncActive: boolean;
+}
+
+let squadSyncTelemetryState: SquadSyncTelemetry = {
+  lastSyncAttemptAt: null,
+  lastSuccessfulSyncAt: null,
+  lastSyncStatus: 'IDLE',
+  updatedPlayerCount: 0,
+  totalSquadCount: 30,
+  syncIntervalMinutes: 30, // Scheduled every 30 minutes
+  syncSource: 'Official Sports Data API (API-Football / Football-Data)',
+  nextScheduledSyncAt: null,
+  lastMessage: 'Periodic background squad sync initialized and running.',
+  autoSyncActive: true,
+};
+
+let scheduledSquadSyncTimer: NodeJS.Timeout | null = null;
+
+export function getSquadSyncTelemetry(): SquadSyncTelemetry {
+  return { ...squadSyncTelemetryState };
+}
+
+/**
+ * Periodically synchronizes first-team player statistics (goals, assists, appearances, minutes, pass accuracy)
+ * from the configured sports data provider (API-Football v3 /players endpoint or Football-Data).
+ * If the live API key is not present or returns an error, the verified club database records remain intact
+ * with safe error logging and zero data loss.
+ */
+export async function syncFirstTeamSquadFromProvider(): Promise<{
+  success: boolean;
+  updatedCount: number;
+  message: string;
+  telemetry: SquadSyncTelemetry;
+}> {
+  const cfg = await getOrCreateFootballApiConfig();
+  const now = new Date();
+  const nowStr = now.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  squadSyncTelemetryState.lastSyncAttemptAt = nowStr;
+
+  const nextDate = new Date(now.getTime() + squadSyncTelemetryState.syncIntervalMinutes * 60 * 1000);
+  squadSyncTelemetryState.nextScheduledSyncAt = nextDate.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+
+  const existingPlayers = await db.select().from(players);
+  squadSyncTelemetryState.totalSquadCount = existingPlayers.length;
+
+  if (!isFootballApiKeyPresent()) {
+    const msg =
+      'FOOTBALL_API_KEY is not configured in Secrets panel. Retaining current authentic club squad statistics.';
+    squadSyncTelemetryState.lastSyncStatus = 'RETAINED_FALLBACK';
+    squadSyncTelemetryState.lastMessage = msg;
+    squadSyncTelemetryState.updatedPlayerCount = 0;
+    return {
+      success: false,
+      updatedCount: 0,
+      message: msg,
+      telemetry: { ...squadSyncTelemetryState },
+    };
+  }
+
+  const apiKey = process.env.FOOTBALL_API_KEY!.trim();
+  const baseUrl = cfg.baseUrl.replace(/\/+$/, '');
+  const headers: Record<string, string> =
+    cfg.provider === 'football-data'
+      ? { 'X-Auth-Token': apiKey, Accept: 'application/json' }
+      : { 'x-apisports-key': apiKey, Accept: 'application/json' };
+
+  try {
+    // API-Football endpoint for team squad player statistics for the current season
+    const currentSeasonYear = '2024'; // standard season identifier for 2024-2025/2026
+    const endpoint =
+      cfg.provider === 'football-data'
+        ? `${baseUrl}/teams/${encodeURIComponent(cfg.teamId)}`
+        : `${baseUrl}/players?team=${encodeURIComponent(cfg.teamId)}&season=${currentSeasonYear}`;
+
+    const res = await fetch(endpoint, { method: 'GET', headers });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Sports API HTTP ${res.status}: ${errText.slice(0, 100)}`);
+    }
+
+    const json = (await res.json()) as any;
+    const apiPlayerList = json?.response || json?.squad || [];
+
+    let updatedCount = 0;
+    if (Array.isArray(apiPlayerList) && apiPlayerList.length > 0) {
+      for (const item of apiPlayerList) {
+        const pData = item.player || item;
+        const pStats = item.statistics?.[0] || {};
+        const pName = (pData.name || '').toLowerCase();
+        const pNum = Number(pStats.games?.number || pData.shirtNumber || 0);
+
+        // Find matching player by squad number or name match
+        const matched = existingPlayers.find(
+          (ep) => (pNum > 0 && ep.squadNumber === pNum) || ep.name.toLowerCase().includes(pName)
+        );
+
+        if (matched) {
+          const newAppearances = Number(pStats.games?.appearences ?? pStats.games?.appearances ?? matched.appearances);
+          const newGoals = Number(pStats.goals?.total ?? matched.goals);
+          const newAssists = Number(pStats.goals?.assists ?? matched.assists);
+          const newMinutes = Number(pStats.games?.minutes ?? matched.minutesPlayed);
+          const newPassAcc = Number(pStats.passes?.accuracy ?? matched.passAccuracy);
+
+          await db
+            .update(players)
+            .set({
+              appearances: newAppearances,
+              goals: newGoals,
+              assists: newAssists,
+              minutesPlayed: newMinutes,
+              passAccuracy: newPassAcc,
+            })
+            .where(eq(players.id, matched.id));
+          updatedCount++;
+        }
+      }
+    }
+
+    squadSyncTelemetryState.lastSuccessfulSyncAt = nowStr;
+    squadSyncTelemetryState.lastSyncStatus = 'SYNCED_LIVE';
+    squadSyncTelemetryState.updatedPlayerCount = updatedCount;
+    const successMsg = `Successfully synchronized statistics for ${updatedCount} players from official sports API provider.`;
+    squadSyncTelemetryState.lastMessage = successMsg;
+
+    return {
+      success: true,
+      updatedCount,
+      message: successMsg,
+      telemetry: { ...squadSyncTelemetryState },
+    };
+  } catch (err: any) {
+    const safeError = sanitizeProviderError(err?.message || 'Failed to fetch squad data from sports API.');
+    squadSyncTelemetryState.lastSyncStatus = 'FAILED';
+    squadSyncTelemetryState.lastMessage = `Sports data sync warning: ${safeError}`;
+    return {
+      success: false,
+      updatedCount: 0,
+      message: safeError,
+      telemetry: { ...squadSyncTelemetryState },
+    };
+  }
+}
+
+/**
+ * Initializes the backend periodic squad sync runner.
+ * Runs on server boot and repeats automatically every 30 minutes without manual intervention.
+ */
+export function startPeriodicSquadSyncJob(intervalMinutes = 30) {
+  if (scheduledSquadSyncTimer) {
+    clearInterval(scheduledSquadSyncTimer);
+  }
+
+  squadSyncTelemetryState.syncIntervalMinutes = intervalMinutes;
+  squadSyncTelemetryState.autoSyncActive = true;
+
+  console.log(`[Galatasaray Engine] Scheduled squad stats sync job initialized. Interval: every ${intervalMinutes} minutes.`);
+
+  // Execute initial sync check 10 seconds after server startup
+  setTimeout(() => {
+    syncFirstTeamSquadFromProvider().catch((err) => {
+      console.warn('[Galatasaray Engine] Initial background squad sync run error:', err?.message);
+    });
+  }, 10000);
+
+  // Set recurring periodic interval
+  scheduledSquadSyncTimer = setInterval(() => {
+    console.log('[Galatasaray Engine] Executing scheduled periodic squad stats synchronization...');
+    syncFirstTeamSquadFromProvider().catch((err) => {
+      console.warn('[Galatasaray Engine] Periodic squad sync execution warning:', err?.message);
+    });
+  }, intervalMinutes * 60 * 1000);
+}
+
