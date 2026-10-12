@@ -955,10 +955,26 @@ export default function App() {
   const filteredPlayers = useMemo(() => {
     return (publicData.players || []).filter((p: any) => {
       if (squadCategoryFilter !== 'All' && p.category !== squadCategoryFilter) return false;
-      if (squadPositionFilter !== 'All' && p.position !== squadPositionFilter) return false;
+      if (squadPositionFilter !== 'All') {
+        const pos = String(p.position || '').toLowerCase();
+        if (squadPositionFilter === 'Goalkeepers' && !pos.includes('goalkeeper')) return false;
+        if (
+          squadPositionFilter === 'Defenders' &&
+          !pos.includes('back') &&
+          !pos.includes('defender')
+        )
+          return false;
+        if (squadPositionFilter === 'Midfielders' && !pos.includes('midfield')) return false;
+        if (
+          squadPositionFilter === 'Forwards & Wingers' &&
+          !pos.includes('winger') &&
+          !pos.includes('forward')
+        )
+          return false;
+      }
       if (
         squadSearchQuery.trim() &&
-        !`${p.name} ${p.nationality} ${p.position}`
+        !`${p.name} ${p.squadNumber} ${p.nationality} ${p.position}`
           .toLowerCase()
           .includes(squadSearchQuery.trim().toLowerCase())
       )
@@ -2389,10 +2405,10 @@ export default function App() {
                   <div className="flex flex-wrap items-end justify-between gap-6">
                     <div>
                       <span className="text-xs font-mono uppercase tracking-widest text-[#FDB912]">
-                        Florya Metin Oktay Roster
+                        Florya Metin Oktay Roster · {(publicData.players || []).length} Official Squad Members
                       </span>
                       <h1 className="font-display text-4xl sm:text-5xl font-bold text-white mt-2">
-                        First Team, Coaching Staff &amp; Legends
+                        First Team Squad Directory
                       </h1>
                     </div>
 
@@ -2401,21 +2417,27 @@ export default function App() {
                         type="search"
                         value={squadSearchQuery}
                         onChange={(e) => setSquadSearchQuery(e.target.value)}
-                        placeholder="Search player name or nation..."
+                        placeholder="Search #number, player, or position..."
                         className="rounded-xl border border-[#232736] bg-[#11131B] px-4 py-2.5 text-xs text-white"
                       />
-                      {['All', 'First Team', 'Coaching Staff', 'Legends'].map((cat) => (
+                      {[
+                        'All',
+                        'Goalkeepers',
+                        'Defenders',
+                        'Midfielders',
+                        'Forwards & Wingers',
+                      ].map((posGroup) => (
                         <button
-                          key={cat}
+                          key={posGroup}
                           type="button"
-                          onClick={() => setSquadCategoryFilter(cat)}
+                          onClick={() => setSquadPositionFilter(posGroup)}
                           className={`px-4 py-2.5 rounded-xl text-xs font-semibold ${
-                            squadCategoryFilter === cat
+                            squadPositionFilter === posGroup
                               ? 'bg-[#A90432] text-white'
                               : 'bg-[#11131B] text-[#94A3B8] border border-[#232736]'
                           }`}
                         >
-                          {cat}
+                          {posGroup}
                         </button>
                       ))}
                     </div>

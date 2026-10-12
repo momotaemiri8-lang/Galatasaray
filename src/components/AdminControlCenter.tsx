@@ -85,7 +85,7 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
   const [eventMinute, setEventMinute] = useState('64');
   const [eventType, setEventType] = useState('GOAL');
   const [eventTeam, setEventTeam] = useState('Galatasaray SK');
-  const [eventPlayer, setEventPlayer] = useState('Mauro Icardi');
+  const [eventPlayer, setEventPlayer] = useState('Victor Osimhen');
   const [eventAssist, setEventAssist] = useState('Gabriel Sara');
   const [eventDescription, setEventDescription] = useState(
     'Clinical right-footed finish inside the penalty area.'
@@ -93,8 +93,8 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
 
   // Squad Form
   const [playerName, setPlayerName] = useState('');
-  const [squadNumber, setSquadNumber] = useState('11');
-  const [playerPosition, setPlayerPosition] = useState('Forward');
+  const [squadNumber, setSquadNumber] = useState('45');
+  const [playerPosition, setPlayerPosition] = useState('Centre-Forward');
   const [playerCategory, setPlayerCategory] = useState('First Team');
   const [playerNationality, setPlayerNationality] = useState('Turkey');
   const [playerBio, setPlayerBio] = useState('');
@@ -1410,11 +1410,18 @@ export const AdminControlCenter: React.FC<AdminControlCenterProps> = ({
                 className="w-full rounded-xl border border-[#232736] bg-[#0B0D13] px-4 py-3 text-sm text-white"
               >
                 <option>Goalkeeper</option>
-                <option>Defender</option>
-                <option>Midfielder</option>
-                <option>Forward</option>
-                <option>Head Coach</option>
-                <option>Legend</option>
+                <option>Centre-Back</option>
+                <option>Centre-Back / Defender</option>
+                <option>Left-Back</option>
+                <option>Right-Back</option>
+                <option>Defensive Midfield</option>
+                <option>Central Midfield</option>
+                <option>Attacking Midfield</option>
+                <option>Right-Winger</option>
+                <option>Right-Winger / Forward</option>
+                <option>Left-Winger</option>
+                <option>Left-Winger / Forward</option>
+                <option>Centre-Forward</option>
               </select>
               <select
                 value={playerCategory}
